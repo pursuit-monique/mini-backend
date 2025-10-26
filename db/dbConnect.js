@@ -7,7 +7,7 @@ async function dbConnect() {
   mongoose
     .connect(
         process.env.DB_URL,
-        console.log(process.env.DB_URL)
+        console.log(process.env.DB_URL),
       {
         //   these are options to ensure that the connection is done properly
         useNewUrlParser: true,
