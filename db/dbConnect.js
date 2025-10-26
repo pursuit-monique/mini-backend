@@ -5,7 +5,7 @@ require("dotenv").config();
 
   console.log("Connecting to MongoDB with URI:", process.env.DB_URL);
 
-const client = new MongoClient(uri, {
+const client = new MongoClient(process.env.DB_URL, {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
