@@ -59,19 +59,29 @@ function jwtAuth(secret) {
   return (req, res, next) => {
     const auth = req.headers && req.headers.authorization;
     if (!auth || !auth.startsWith('Bearer ')) {
+      console.warn('profile.jwtAuth: missing or malformed Authorization header on', req.path);
       return next(UnauthorizedError('Missing Authorization header or token'));
     }
     const token = auth.slice(7).trim();
     try {
+      console.debug('profile.jwtAuth: token length', token.length, 'for', req.path);
       const payload = jwt.verify(token, secret);
+      console.debug('profile.jwtAuth: decoded payload', payload);
       const id = payload && (payload._id || payload.userId);
       const pub = payload && payload.luser;
-      if (!id) return next(UnauthorizedError('Token payload missing user id'));
-      if (!pub) return next(UnauthorizedError('Token payload missing luser - reauthenticate'));
+      if (!id) {
+        console.warn('profile.jwtAuth: token payload missing user id for', req.path, 'payload:', payload);
+        return next(UnauthorizedError('Token payload missing user id'));
+      }
+      if (!pub) {
+        // allow but warn if luser missing
+        console.warn('profile.jwtAuth: token missing public user id (luser)');
+      }
       req.user = { id };
       req.user.luser = pub;
       return next();
     } catch (err) {
+      console.error('profile.jwtAuth: token verification failed for', req.path, 'error:', err && err.message);
       return next(UnauthorizedError('Invalid or expired token'));
     }
   };

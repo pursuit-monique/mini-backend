@@ -37,18 +37,29 @@ function jwtAuth(secret) {
   if (!secret || typeof secret !== 'string') throw new Error('jwtAuth requires a JWT secret string');
   return (req, res, next) => {
     const auth = req.headers && req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) return next(UnauthorizedError('Missing Authorization header or token'));
+    if (!auth || !auth.startsWith('Bearer ')) {
+      console.warn('jwtAuth: missing or malformed Authorization header on', req.path);
+      return next(UnauthorizedError('Missing Authorization header or token'));
+    }
     const token = auth.slice(7).trim();
     try {
+      // debug: do not log full token, only length
+      console.debug('jwtAuth: token length', token.length, 'for', req.path);
       const payload = jwt.verify(token, secret);
-      const id = payload && (payload._id || payload.userId);
-      const pub = payload && payload.luser;
-      if (!id) return next(UnauthorizedError('Token payload missing user id'));
-      if (!pub) return next(UnauthorizedError('Token payload missing luser - reauthenticate'));
+      console.debug('jwtAuth: decoded payload', payload);
+      // accept multiple possible id fields used by different token issuers
+      const id = payload && (payload._id || payload.userId || payload.user_id || payload.id);
+      const pub = payload && (payload.luser || payload.user_id || payload.publicUserId || payload.public_id);
+      if (!id) {
+        console.warn('jwtAuth: token payload missing user id for', req.path, 'payload:', payload);
+        return next(UnauthorizedError('Token payload missing user id'));
+      }
+      // do not require public id (luser) — optional
       req.user = { id };
-      req.user.luser = pub;
+      if (pub) req.user.luser = pub;
       return next();
     } catch (err) {
+      console.error('jwtAuth: token verification failed for', req.path, 'error:', err && err.message);
       return next(UnauthorizedError('Invalid or expired token'));
     }
   };
