@@ -64,7 +64,7 @@ function jwtAuth(secret) {
     const token = auth.slice(7).trim();
     try {
       const payload = jwt.verify(token, secret);
-      const id = payload && (payload._1d || payload.userId);
+      const id = payload && (payload._id || payload.userId);
       const pub = payload && payload.luser;
       if (!id) return next(UnauthorizedError('Token payload missing user id'));
       if (!pub) return next(UnauthorizedError('Token payload missing luser - reauthenticate'));
