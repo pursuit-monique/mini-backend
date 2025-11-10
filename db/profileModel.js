@@ -120,7 +120,7 @@ async function getProfile(targetUserId) {
 
 // Get profile by public user_id string
 async function getProfileByUserId(publicUserId) {
-  if (!publicUserId) throw BadRequestError('Missing user_id');
+  if (!publicUserId) throw BadRequest
   const User = mongoose.model('User');
   const user = await User.findOne({ user_id: publicUserId }).select('_id user_id');
   if (!user) return null;
@@ -245,3 +245,6 @@ module.exports = {
   createProfileRouter,
   jwtAuth,
 };
+
+module.exports.ProfileModel = Profile || mongoose.model("Profile", ProfileSchema);
+module.exports.default = Profile || mongoose.model("Profile", ProfileSchema);

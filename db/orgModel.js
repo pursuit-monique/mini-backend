@@ -15,6 +15,7 @@ const OrgSchema = new Schema(
     name: { type: String, required: true, trim: true },
     org_image_url: { type: String, trim: true },
     specialties: [{ type: Schema.Types.ObjectId, ref: 'Type' }],
+    specialty_codes: [{ type: Number }], // numeric codes (frontend convenience)
     phone: { type: String, trim: true },
     address: { type: String, trim: true },
     city: { type: String, trim: true },
@@ -73,12 +74,14 @@ async function createOrg(authUserId, payload) {
   if (!authUserId) throw UnauthorizedError('Not authenticated');
   if (!payload || !payload.name) throw BadRequestError('Missing organization name');
 
-  // verify specialties
-  await verifySpecialties(payload.specialties);
+  // verify specialties if provided as ObjectId array
+  if (payload.specialties && payload.specialties.length) {
+    await verifySpecialties(payload.specialties);
+  }
 
   // owner_id = authenticated user id
   const ownerId = authUserId;
-  // find User to get public user_id
+  // find
   const User = mongoose.model('User');
   const user = await User.findById(ownerId).select('user_id org_id');
   if (!user) throw BadRequestError('Owner user not found');
@@ -101,6 +104,7 @@ async function createOrg(authUserId, payload) {
     name: payload.name,
     org_image_url: payload.org_image_url,
     specialties: payload.specialties || [],
+    specialty_codes: payload.specialty_codes || [],
     phone: payload.phone,
     address: payload.address,
     city: payload.city,
@@ -121,6 +125,7 @@ async function createOrg(authUserId, payload) {
   const p = await Org.findById(doc._id).populate({ path: 'specialties' });
   const obj = p.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
+  if (!obj.specialty_codes) obj.specialty_codes = [];
   return obj;
 }
 
@@ -130,6 +135,7 @@ async function getOrgById(id) {
   if (!p) return null;
   const obj = p.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
+  if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
   return obj;
 }
 
@@ -138,6 +144,7 @@ async function listOrgs() {
   return docs.map(d => {
     const obj = d.toObject();
     if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
+    if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
     return obj;
   });
 }
@@ -153,7 +160,7 @@ async function updateOrg(id, authUserId, update) {
 
   if (update.specialties) await verifySpecialties(update.specialties);
 
-  const allowed = ['name','org_image_url','specialties','phone','address','city','state','zipcode','is_open','donations_needed','donations_acquired'];
+  const allowed = ['name','org_image_url','specialties','specialty_codes','phone','address','city','state','zipcode','is_open','donations_needed','donations_acquired'];
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(update, key)) org[key] = update[key];
   }
@@ -162,6 +169,7 @@ async function updateOrg(id, authUserId, update) {
   const p = await Org.findById(org._id).populate({ path: 'specialties' });
   const obj = p.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
+  if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
   return obj;
 }
 
@@ -228,3 +236,7 @@ function createOrgRouter(requireAuth) {
 }
 
 module.exports = { Org, createOrg, getOrgById, listOrgs, updateOrg, deleteOrg, createOrgRouter, jwtAuth };
+
+// also export the mongoose model directly for compatibility
+module.exports.OrgModel = Org || mongoose.model("Org", OrgSchema);
+module.exports.default = Org || mongoose.model("Org", OrgSchema);
