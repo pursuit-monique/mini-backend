@@ -136,6 +136,9 @@ async function getOrgById(id) {
   const obj = p.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
   if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
+  // hide internal fields from public response
+  delete obj._id;
+  delete obj.owner_id;
   return obj;
 }
 
@@ -145,6 +148,9 @@ async function listOrgs() {
     const obj = d.toObject();
     if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
     if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
+    // hide internal fields from public response
+    delete obj._id;
+    delete obj.owner_id;
     return obj;
   });
 }
