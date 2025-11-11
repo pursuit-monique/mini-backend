@@ -113,35 +113,40 @@ async function createOrg(authUserId, payload) {
   if (!orgIdCandidate) throw new Error('Failed to generate unique org_id');
 
   const doc = new Org({
-    owner_id: ownerId,
-    owner_user_id: user.user_id,
-    org_id: orgIdCandidate,
     name: payload.name,
-    org_image_url: payload.org_image_url,
-    specialties: payload.specialties || [],
-    specialty_codes: payload.specialty_codes || [],
+    website: payload.website,
     phone: payload.phone,
+    email: payload.email,
     address: payload.address,
     city: payload.city,
     state: payload.state,
-    zipcode: payload.zipcode,
-    is_open: !!payload.is_open,
-    donations_needed: Number(payload.donations_needed) || 0,
-    donations_acquired: Number(payload.donations_acquired) || 0,
+    zip: payload.zip,
+    owner: authUserId,
+    // owner_id: ownerId,
+    // owner_user_id: user.user_id,
+    // org_id: orgIdCandidate,
+    // specialties: payload.specialties || [],
+    // specialty_codes: payload.specialty_codes || [],
+    // is_open: !!payload.is_open,
+    // donations_needed: Number(payload.donations_needed) || 0,
+    // donations_acquired: Number(payload.donations_acquired) || 0,
   });
 
   await doc.save();
-  // write back org_id to user if not set
-  if (!user.org_id) {
-    user.org_id = orgIdCandidate;
-    // eslint-disable-next-line no-await-in-loop
-    await user.save();
+
+  // Link the created org to the creator's profile (if any)
+  try {
+    const mongoose = require('mongoose');
+    const Profile = mongoose.model('Profile');
+    if (Profile) {
+      await Profile.findOneAndUpdate({ user: authUserId }, { org: doc._id });
+      console.debug('orgModel: linked org', doc._id, 'to profile of user', authUserId);
+    }
+  } catch (linkErr) {
+    console.error('orgModel: failed to link org to profile', linkErr && linkErr.message ? linkErr.message : linkErr);
   }
-  const p = await Org.findById(doc._id).populate({ path: 'specialties' });
-  const obj = p.toObject();
-  if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
-  if (!obj.specialty_codes) obj.specialty_codes = [];
-  return obj;
+
+  return doc;
 }
 
 async function getOrgById(id) {
