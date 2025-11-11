@@ -15,6 +15,7 @@ const OrgSchema = new Schema(
     org_id: { type: String, required: true, trim: true, unique: true, index: true },
     name: { type: String, required: true, trim: true },
     website: { type: String, trim: true },
+    donation_url: { type: String, trim: true },
     org_image_url: { type: String, trim: true },
     specialties: [{ type: Schema.Types.ObjectId, ref: 'Type' }],
     phone: { type: String, trim: true },
@@ -172,6 +173,7 @@ async function createOrg(authUserId, payload) {
   const doc = new Org({
     name: payload.name,
     website: payload.website,
+    donation_url: payload.donation_url || payload.donationUrl || '',
     org_image_url: payload.org_image_url || payload.org_imageUrl,
     specialties: specialtiesResolved,
     specialty_codes: payload.specialty_codes || payload.specialtyCodes || [],
@@ -266,13 +268,17 @@ async function updateOrg(id, authUserId, update) {
   const org = await Org.findById(id);
   if (!org) throw BadRequestError('Org not found');
 
-  if (org.owner_id.toString() !== authUserId.toString()) throw UnauthorizedError('Cannot modify org you do not own');
+  // allow ownership by either internal ObjectId (owner_id) or public owner_user_id
+  const authIdStr = authUserId ? String(authUserId) : null;
+  const ownerIdStr = org.owner_id ? String(org.owner_id) : null;
+  const ownerUserIdStr = org.owner_user_id ? String(org.owner_user_id) : null;
+  if (authIdStr !== ownerIdStr && authIdStr !== ownerUserIdStr) throw UnauthorizedError('Cannot modify org you do not own');
 
   if (update.specialties) {
     update.specialties = await verifySpecialties(update.specialties);
   }
 
-  const allowed = ['name','org_image_url','specialties','phone','address','city','state','zipcode','is_open','donations_needed','donations_acquired','website'];
+  const allowed = ['name','org_image_url','specialties','phone','address','city','state','zipcode','is_open','donations_needed','donations_acquired','website','donation_url'];
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(update, key)) org[key] = update[key];
   }
@@ -310,7 +316,10 @@ async function deleteOrg(id, authUserId) {
 
   const org = await Org.findById(id);
   if (!org) throw BadRequestError('Org not found');
-  if (org.owner_id.toString() !== authUserId.toString()) throw UnauthorizedError('Cannot delete org you do not own');
+  const authIdStrDel = authUserId ? String(authUserId) : null;
+  const ownerIdStrDel = org.owner_id ? String(org.owner_id) : null;
+  const ownerUserIdStrDel = org.owner_user_id ? String(org.owner_user_id) : null;
+  if (authIdStrDel !== ownerIdStrDel && authIdStrDel !== ownerUserIdStrDel) throw UnauthorizedError('Cannot delete org you do not own');
 
   await Org.deleteOne({ _id: id });
   return { deleted: true };
