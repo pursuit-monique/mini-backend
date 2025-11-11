@@ -34,8 +34,9 @@ router.post('/token', async (req, res) => {
     await saveRefreshToken(user._id, newRefresh);
     const access = signAccessToken(user);
     // send tokens
-    res.cookie('TOKEN', access, { httpOnly: true, sameSite: 'lax' });
-    res.cookie('REFRESH_TOKEN', newRefresh, { httpOnly: true, sameSite: 'lax' });
+    const cookieOpts = { httpOnly: true, sameSite: 'None', secure: process.env.NODE_ENV === 'production' };
+    res.cookie('TOKEN', access, { ...cookieOpts, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.cookie('REFRESH_TOKEN', newRefresh, { ...cookieOpts, maxAge: 30 * 24 * 60 * 60 * 1000 });
     console.debug('/auth/token: issued new access and refresh tokens for user', user._id);
     res.json({ token: access });
   } catch (err) {

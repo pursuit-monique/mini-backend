@@ -93,7 +93,7 @@ function cookieOptions() {
   return {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'Lax',
+    sameSite: 'None',
   };
 }
 
