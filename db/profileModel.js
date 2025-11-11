@@ -90,17 +90,21 @@ function jwtAuth(secret) {
 // Create profile
 async function createProfile(authUserId, payload) {
   if (!authUserId) throw UnauthorizedError('Not authenticated');
-  if (!payload || !payload.user) throw BadRequestError('Missing user id in payload');
+  // allow payload.user to be omitted; use authenticated user id
+  const targetUser = payload && payload.user ? payload.user : authUserId;
 
-  if (authUserId.toString() !== payload.user.toString()) throw UnauthorizedError('Cannot create profile for another user');
+  if (!targetUser) throw BadRequestError('Missing user id in payload');
 
-  await verifyOrg(payload.org);
+  // ensure only creating for self
+  if (authUserId.toString() !== targetUser.toString()) throw UnauthorizedError('Cannot create profile for another user');
 
-  const existing = await Profile.findOne({ user: payload.user });
+  await verifyOrg(payload && payload.org);
+
+  const existing = await Profile.findOne({ user: targetUser });
   if (existing) throw BadRequestError('Profile already exists for this user');
 
   const doc = new Profile({
-    user: payload.user,
+    user: targetUser,
     password: payload.password,
     firstName: payload.firstName,
     lastName: payload.lastName,
@@ -205,7 +209,8 @@ function createProfileRouter(requireAuth) {
   router.get('/by-userid/:userId', async (req, res, next) => {
     try {
       const result = await getProfileByUserId(req.params.userId);
-      if (!result) return res.status(404).json({ message: 'Profile not found' });
+      // If no profile exists yet, return an empty object (200) so clients don't see a 404 in network console
+      if (!result) return res.json({});
       res.json(result);
     } catch (err) {
       next(err);
