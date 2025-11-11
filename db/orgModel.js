@@ -77,32 +77,47 @@ async function verifySpecialties(ids = []) {
 
   const resolved = [];
   // helper to escape regex special chars for name matching
-  const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  for (const item of ids) {
+  for (const raw of ids) {
     // skip empty values
-    if (item === null || item === undefined || String(item).trim() === '') continue;
+    if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) continue;
+
+    let item = raw;
+    // if frontend sent an object like { id, name } or { _id, name }
+    if (typeof item === 'object') {
+      if (item._id) item = String(item._id);
+      else if (item.id) item = item.id;
+      else if (item.name) item = item.name;
+      else if (item.value) item = item.value;
+      else if (item.code) item = item.code;
+      else item = String(item);
+    }
+
+    const s = String(item).trim();
+    if (!s) continue;
 
     // 1) If looks like ObjectId and exists, accept it
-    if (mongoose.Types.ObjectId.isValid(String(item))) {
-      const exists = await Type.exists({ _id: item });
+    if (mongoose.Types.ObjectId.isValid(s)) {
+      const exists = await Type.exists({ _id: s });
       if (!exists) throw BadRequestError('One or more specialties not found');
-      resolved.push(item);
+      resolved.push(s);
       continue;
     }
 
     // 2) If numeric code, try to find by numeric id field
-    const asNum = Number(item);
+    const asNum = Number(s);
     if (Number.isFinite(asNum)) {
-      const found = await Type.findOne({ id: asNum });
+      // prefer field 'id' or 'code'
+      let found = await Type.findOne({ id: asNum });
+      if (!found) found = await Type.findOne({ code: asNum });
       if (!found) throw BadRequestError('One or more specialties not found');
       resolved.push(found._id);
       continue;
     }
 
     // 3) Otherwise treat as name (case-insensitive exact match)
-    const name = String(item).trim();
-    const foundByName = await Type.findOne({ name: { $regex: `^${escapeRegExp(name)}$`, $options: 'i' } });
+    const foundByName = await Type.findOne({ name: { $regex: `^${escapeRegExp(s)}$`, $options: 'i' } });
     if (foundByName) {
       resolved.push(foundByName._id);
       continue;
