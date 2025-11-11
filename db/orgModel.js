@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const { Schema } = mongoose;
 
@@ -112,6 +113,9 @@ async function createOrg(authUserId, payload) {
   }
   if (!orgIdCandidate) throw new Error('Failed to generate unique org_id');
 
+  // generate a short public id for the org (8 hex chars)
+  const pubId = crypto.randomBytes(4).toString('hex');
+
   const doc = new Org({
     name: payload.name,
     website: payload.website,
@@ -122,9 +126,10 @@ async function createOrg(authUserId, payload) {
     state: payload.state,
     zip: payload.zip,
     owner: authUserId,
-    // owner_id: ownerId,
-    // owner_user_id: user.user_id,
-    // org_id: orgIdCandidate,
+    // populate required owner fields and public org id
+    owner_user_id: authUserId,
+    owner_id: authUserId,
+    org_id: pubId,
     // specialties: payload.specialties || [],
     // specialty_codes: payload.specialty_codes || [],
     // is_open: !!payload.is_open,
