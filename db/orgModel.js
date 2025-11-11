@@ -36,25 +36,29 @@ const BadRequestError = (msg = 'Bad Request') => { const e = new Error(msg); e.s
 function jwtAuth(secret) {
   if (!secret || typeof secret !== 'string') throw new Error('jwtAuth requires a JWT secret string');
   return (req, res, next) => {
-    const auth = req.headers && req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
-      console.warn('jwtAuth: missing or malformed Authorization header on', req.path);
+    const authHeader = req.headers && req.headers.authorization;
+    let token;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else if (req.cookies && req.cookies.TOKEN) {
+      token = req.cookies.TOKEN;
+    }
+
+    if (!token) {
+      console.warn('jwtAuth: missing Authorization header and no TOKEN cookie on', req.path);
       return next(UnauthorizedError('Missing Authorization header or token'));
     }
-    const token = auth.slice(7).trim();
+
     try {
-      // debug: do not log full token, only length
       console.debug('jwtAuth: token length', token.length, 'for', req.path);
       const payload = jwt.verify(token, secret);
       console.debug('jwtAuth: decoded payload', payload);
-      // accept multiple possible id fields used by different token issuers
       const id = payload && (payload._id || payload.userId || payload.user_id || payload.id);
       const pub = payload && (payload.luser || payload.user_id || payload.publicUserId || payload.public_id);
       if (!id) {
         console.warn('jwtAuth: token payload missing user id for', req.path, 'payload:', payload);
         return next(UnauthorizedError('Token payload missing user id'));
       }
-      // do not require public id (luser) — optional
       req.user = { id };
       if (pub) req.user.luser = pub;
       return next();
