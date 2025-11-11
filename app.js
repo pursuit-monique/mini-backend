@@ -3,6 +3,7 @@ const app = express();
 const bodyParser = require("body-parser");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const cookieParser = require('cookie-parser');
 
 // require database connection
 const dbConnect = require("./db/dbConnect");
@@ -10,6 +11,8 @@ const User = require("./db/userModel");
 const auth = require("./auth");
 const { createProfileRouter } = require('./db/profileModel');
 const { createOrgRouter } = require('./db/orgModel');
+const tokenService = require('./auth/tokenService');
+const refreshRoutes = require('./auth/refreshRoutes');
 
 // helper to generate 8-char mixed id
 function generateId() {
@@ -40,7 +43,7 @@ async function ensureUserId(user) {
 // execute database connection
 dbConnect();
 
-// Curb Cores Error by adding a header here
+// Curb CORS
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader(
@@ -54,157 +57,94 @@ app.use((req, res, next) => {
   next();
 });
 
-// body parser configuration
+// body parser + cookies
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cookieParser());
 
-app.get("/", (request, response, next) => {
-  response.json({ message: "Hey! This is your server response!" });
-  next();
+// mount refresh endpoints
+app.use('/auth', refreshRoutes);
+
+// logout endpoint - revoke refresh token and clear cookies
+app.post('/auth/logout', async (req, res) => {
+  try {
+    const provided = (req.cookies && req.cookies.REFRESH_TOKEN) || req.body.refreshToken;
+    if (provided) await tokenService.revokeRefreshToken(provided);
+    res.clearCookie('TOKEN');
+    res.clearCookie('REFRESH_TOKEN');
+    res.json({ loggedOut: true });
+  } catch (err) {
+    console.error('logout error', err);
+    res.status(500).json({ message: 'Logout failed' });
+  }
 });
 
+app.get('/', (request, response) => {
+  response.json({ message: 'Hey! This is your server response!' });
+});
+
+// cookie options helper
+function cookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'Lax',
+  };
+}
+
 // register endpoint
-app.post("/register", (request, response) => {
-  // hash the password
-  bcrypt
-    .hash(request.body.password, 10)
-    .then(async (hashedPassword) => {
-      // create a new user instance and collect the data
-      const user = new User({
-        email: request.body.email,
-        password: hashedPassword,
-      });
+app.post('/register', async (request, response) => {
+  try {
+    const hashedPassword = await bcrypt.hash(request.body.password, 10);
+    const user = new User({ email: request.body.email, password: hashedPassword });
+    await ensureUserId(user);
+    const result = await user.save();
 
-      // ensure public user_id exists BEFORE saving to satisfy validation
-      try {
-        await ensureUserId(user);
-      } catch (err) {
-        // proceed; ensureUserId will throw only if it fails to generate an id
-        return response.status(500).send({ message: 'Failed to generate user_id', err });
-      }
+    // sign access token (7 days)
+    const accessToken = tokenService.signAccessToken(result);
+    const refreshToken = tokenService.generateRefreshToken();
+    await tokenService.saveRefreshToken(result._id, refreshToken);
 
-      // save the new user
-      user
-        .save()
-        // return success if the new user is added to the database successfully
-        .then((result) => {
-          try {
-            // create JWT token including public user_id
-            const token = jwt.sign(
-              {
-                userId: result._id,
-                userEmail: result.email,
-                luser: result.user_id,
-              },
-              "RANDOM-TOKEN",
-              { expiresIn: "24h" }
-            );
+    // set cookies
+    response.cookie('TOKEN', accessToken, { ...cookieOptions(), maxAge: 7 * 24 * 60 * 60 * 1000 });
+    response.cookie('REFRESH_TOKEN', refreshToken, { ...cookieOptions(), maxAge: 30 * 24 * 60 * 60 * 1000 });
 
-            response.status(201).send({
-              message: "User Created Successfully",
-              result,
-              token,
-            });
-          } catch (err) {
-            response.status(201).send({ message: 'User created but failed to issue token', result });
-          }
-        })
-        // catch erroe if the new user wasn't added successfully to the database
-        .catch((error) => {
-          response.status(500).send({
-            message: "Error creating user",
-            error,
-          });
-        });
-    })
-    // catch error if the password hash isn't successful
-    .catch((e) => {
-      response.status(500).send({
-        message: "Password was not hashed successfully",
-        e,
-      });
-    });
+    response.status(201).json({ message: 'User Created Successfully', result, token: accessToken });
+  } catch (err) {
+    console.error('register error', err);
+    response.status(500).json({ message: 'Error creating user', err });
+  }
 });
 
 // login endpoint
-app.post("/login", (request, response) => {
-  // check if email exists
-  User.findOne({ email: request.body.email })
+app.post('/login', async (request, response) => {
+  try {
+    const user = await User.findOne({ email: request.body.email });
+    if (!user) return response.status(404).json({ message: 'Email not found' });
+    const passwordOk = await bcrypt.compare(request.body.password, user.password);
+    if (!passwordOk) return response.status(400).json({ message: 'Passwords does not match' });
 
-    // if email exists
-    .then((user) => {
-      if (!user) {
-        return response.status(404).send({ message: 'Email not found' });
-      }
-      // compare the password entered and the hashed password found
-      bcrypt
-        .compare(request.body.password, user.password)
+    const u = await ensureUserId(user);
+    const accessToken = tokenService.signAccessToken(u);
+    const refreshToken = tokenService.generateRefreshToken();
+    await tokenService.saveRefreshToken(u._id, refreshToken);
 
-        // if the passwords match
-        .then(async (passwordCheck) => {
+    response.cookie('TOKEN', accessToken, { ...cookieOptions(), maxAge: 7 * 24 * 60 * 60 * 1000 });
+    response.cookie('REFRESH_TOKEN', refreshToken, { ...cookieOptions(), maxAge: 30 * 24 * 60 * 60 * 1000 });
 
-          // check if password matches
-          if(!passwordCheck) {
-            return response.status(400).send({
-              message: "Passwords does not match",
-            });
-          }
-
-          try {
-            // ensure user_id exists for older users
-            const u = await ensureUserId(user);
-
-            //   create JWT token
-            const token = jwt.sign(
-              {
-                userId: u._id,
-                userEmail: u.email,
-                luser: u.user_id,
-              },
-              "RANDOM-TOKEN",
-              { expiresIn: "24h" }
-            );
-
-            //   return success response
-            response.status(200).send({
-              message: "Login Successful",
-              email: u.email,
-              token,
-            });
-          } catch (err) {
-            response.status(500).send({ message: 'Failed to ensure user_id', err });
-          }
-        })
-        // catch error if password do not match
-        .catch((error) => {
-          response.status(400).send({
-            message: "Passwords does not match",
-            error,
-          });
-        });
-    })
-    // catch error if email does not exist
-    .catch((e) => {
-      response.status(404).send({
-        message: "Email not found",
-        e,
-      });
-    });
+    response.json({ message: 'Login Successful', email: u.email, token: accessToken });
+  } catch (err) {
+    console.error('login error', err);
+    response.status(500).json({ message: 'Login failed', err });
+  }
 });
 
-// free endpoint
-app.get("/free-endpoint", (request, response) => {
-  response.json({ message: "You are free to access me anytime" });
-});
+// free and auth endpoints (keep existing auth middleware if used elsewhere)
+app.get('/free-endpoint', (request, response) => response.json({ message: 'You are free to access me anytime' }));
+app.get('/auth-endpoint', auth, (request, response) => response.send({ message: 'You are authorized to access me' }));
 
-// authentication endpoint
-app.get("/auth-endpoint", auth, (request, response) => {
-  response.send({ message: "You are authorized to access me" });
-});
-
-// mount profiles router (public GET, protected create/update/delete)
-app.use('/profiles', createProfileRouter('RANDOM-TOKEN'));
-// mount orgs router
-app.use('/orgs', createOrgRouter('RANDOM-TOKEN'));
+// mount profile and org routers with JWT secret
+app.use('/profiles', createProfileRouter(process.env.JWT_SECRET || 'RANDOM-TOKEN'));
+app.use('/orgs', createOrgRouter(process.env.JWT_SECRET || 'RANDOM-TOKEN'));
 
 module.exports = app;
