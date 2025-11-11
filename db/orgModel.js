@@ -14,6 +14,7 @@ const OrgSchema = new Schema(
     owner_user_id: { type: String, required: true, trim: true, index: true }, // public user_id for joins
     org_id: { type: String, required: true, trim: true, unique: true, index: true },
     name: { type: String, required: true, trim: true },
+    website: { type: String, trim: true },
     org_image_url: { type: String, trim: true },
     specialties: [{ type: Schema.Types.ObjectId, ref: 'Type' }],
     specialty_codes: [{ type: Number }], // numeric codes (frontend convenience)
@@ -23,8 +24,8 @@ const OrgSchema = new Schema(
     state: { type: String, trim: true },
     zipcode: { type: String, trim: true },
     is_open: { type: Boolean, default: false },
-    donations_needed: { type: Number, default: 0 },
-    donations_acquired: { type: Number, default: 0 },
+    donation_goal: { type: Number, default: 0 },
+    donation_amount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -99,7 +100,7 @@ async function createOrg(authUserId, payload) {
   const ownerId = authUserId;
   // find
   const User = mongoose.model('User');
-  const user = await User.findById(ownerId).select('user_id org_id');
+  const user = await User.findById(ownerId).select('user_id');
   if (!user) throw BadRequestError('Owner user not found');
 
   // generate unique org_id
@@ -119,30 +120,28 @@ async function createOrg(authUserId, payload) {
   const doc = new Org({
     name: payload.name,
     website: payload.website,
+    org_image_url: payload.org_image_url || payload.org_imageUrl,
+    specialties: Array.isArray(payload.specialties) ? payload.specialties : (payload.specialties ? [payload.specialties] : []),
+    specialty_codes: payload.specialty_codes || payload.specialtyCodes || [],
     phone: payload.phone,
-    email: payload.email,
     address: payload.address,
     city: payload.city,
     state: payload.state,
-    zip: payload.zip,
-    owner: authUserId,
-    // populate required owner fields and public org id
-    owner_user_id: authUserId,
+    zipcode: payload.zip || payload.zipcode || '',
+    is_open: !!payload.is_open,
+    donation_goal: Number(payload.donation_goal || payload.donationGoal) || 0,
+    donation_amount: Number(payload.donation_amount || payload.donationAmount) || 0,
     owner_id: authUserId,
+    owner_user_id: user.user_id || authUserId.toString(),
     org_id: pubId,
-    // specialties: payload.specialties || [],
-    // specialty_codes: payload.specialty_codes || [],
-    // is_open: !!payload.is_open,
-    // donations_needed: Number(payload.donations_needed) || 0,
-    // donations_acquired: Number(payload.donations_acquired) || 0,
   });
 
   await doc.save();
 
   // Link the created org to the creator's profile (if any)
   try {
-    const mongoose = require('mongoose');
-    const Profile = mongoose.model('Profile');
+    const mongooseLocal = require('mongoose');
+    const Profile = mongooseLocal.model('Profile');
     if (Profile) {
       await Profile.findOneAndUpdate({ user: authUserId }, { org: doc._id });
       console.debug('orgModel: linked org', doc._id, 'to profile of user', authUserId);
@@ -162,8 +161,8 @@ async function getOrgById(id) {
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
   if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
   // hide internal fields from public response
-  delete obj._id;
-  delete obj.owner_id;
+  // keep obj._id so client can PATCH using the Mongo id
+  if (obj.owner_id) delete obj.owner_id;
   return obj;
 }
 
@@ -174,8 +173,7 @@ async function listOrgs() {
     if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
     if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
     // hide internal fields from public response
-    delete obj._id;
-    delete obj.owner_id;
+    if (obj.owner_id) delete obj.owner_id;
     return obj;
   });
 }
@@ -191,7 +189,7 @@ async function updateOrg(id, authUserId, update) {
 
   if (update.specialties) await verifySpecialties(update.specialties);
 
-  const allowed = ['name','org_image_url','specialties','specialty_codes','phone','address','city','state','zipcode','is_open','donations_needed','donations_acquired'];
+  const allowed = ['name','org_image_url','specialties','specialty_codes','phone','address','city','state','zipcode','is_open','donation_goal','donation_amount','website'];
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(update, key)) org[key] = update[key];
   }
