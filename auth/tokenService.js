@@ -10,7 +10,7 @@ function signAccessToken(user) {
     userId: user._id,
     luser: user.user_id,
   };
-  const secret = process.env.JWT_SECRET || 'dev-secret';
+  const secret = process.env.JWT_SECRET || 'RANDOM-TOKEN';
   const token = jwt.sign(payload, secret, { expiresIn: ACCESS_EXPIRES });
   return token;
 }
