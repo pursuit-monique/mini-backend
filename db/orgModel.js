@@ -72,10 +72,36 @@ function jwtAuth(secret) {
 
 // ensure specialties exist if provided
 async function verifySpecialties(ids = []) {
-  if (!ids || !ids.length) return;
+  if (!ids || !ids.length) return [];
   const Type = mongoose.model('Type');
-  const count = await Type.countDocuments({ _id: { $in: ids } });
-  if (count !== ids.length) throw BadRequestError('One or more specialties not found');
+
+  // if all items look like ObjectIds, validate existence
+  const allObjectIds = ids.every(i => mongoose.Types.ObjectId.isValid(String(i)));
+  if (allObjectIds) {
+    const count = await Type.countDocuments({ _id: { $in: ids } });
+    if (count !== ids.length) throw BadRequestError('One or more specialties not found');
+    return ids;
+  }
+
+  // otherwise try to resolve by name (string) or numeric id/code
+  const stringItems = ids.map(i => String(i));
+  // try match by name
+  const foundByName = await Type.find({ name: { $in: stringItems } });
+  if (foundByName && foundByName.length) {
+    // if every string item matched a Type by name, return those ids
+    if (foundByName.length === stringItems.filter(si => isNaN(Number(si))).length) {
+      return foundByName.map(d => d._id);
+    }
+  }
+
+  // attempt to resolve numeric codes (e.g. local mapping ids)
+  const numericCandidates = ids.map(i => { const n = Number(i); return Number.isFinite(n) ? n : null; }).filter(Boolean);
+  if (numericCandidates.length) {
+    const foundByCode = await Type.find({ id: { $in: numericCandidates } });
+    if (foundByCode && foundByCode.length === numericCandidates.length) return foundByCode.map(d => d._id);
+  }
+
+  throw BadRequestError('One or more specialties not found');
 }
 
 // helper to generate 8-char id
@@ -91,8 +117,9 @@ async function createOrg(authUserId, payload) {
   if (!payload || !payload.name) throw BadRequestError('Missing organization name');
 
   // verify specialties if provided as ObjectId array
+  let specialtiesResolved = [];
   if (payload.specialties && payload.specialties.length) {
-    await verifySpecialties(payload.specialties);
+    specialtiesResolved = await verifySpecialties(payload.specialties);
   }
 
   // owner_id = authenticated user id
@@ -120,7 +147,7 @@ async function createOrg(authUserId, payload) {
     name: payload.name,
     website: payload.website,
     org_image_url: payload.org_image_url || payload.org_imageUrl,
-    specialties: Array.isArray(payload.specialties) ? payload.specialties : (payload.specialties ? [payload.specialties] : []),
+    specialties: specialtiesResolved,
     specialty_codes: payload.specialty_codes || payload.specialtyCodes || [],
     phone: payload.phone,
     address: payload.address,
@@ -128,8 +155,8 @@ async function createOrg(authUserId, payload) {
     state: payload.state,
     zipcode: payload.zip || payload.zipcode || '',
     is_open: !!payload.is_open,
-    donation_needed: Number(payload.donation_goal || payload.donationGoal) || 0,
-    donation_aquired: Number(payload.donation_amount || payload.donationAmount) || 0,
+    donations_needed: Number(payload.donation_goal || payload.donationGoal) || 0,
+    donations_acquired: Number(payload.donation_amount || payload.donationAmount) || 0,
     owner_id: authUserId,
     owner_user_id: user.user_id || authUserId.toString(),
     org_id: pubId,
@@ -137,31 +164,22 @@ async function createOrg(authUserId, payload) {
 
   await doc.save();
 
-  // Link the created org to the creator's profile (if any)
-  try {
-    const mongooseLocal = require('mongoose');
-    const Profile = mongooseLocal.model('Profile');
-    if (Profile) {
-      await Profile.findOneAndUpdate({ user: authUserId }, { org: doc._id });
-      console.debug('orgModel: linked org', doc._id, 'to profile of user', authUserId);
-    }
-  } catch (linkErr) {
-    console.error('orgModel: failed to link org to profile', linkErr && linkErr.message ? linkErr.message : linkErr);
-  }
-
-  return doc;
+  // return the created org populated
+  const p = await Org.findById(doc._id).populate({ path: 'specialties' });
+  const obj = p.toObject();
+  if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
+  return obj;
 }
 
 async function getOrgById(id) {
   if (!id) throw BadRequestError('Missing org id');
-  const p = await Org.findById(id).populate({ path: 'specialties' });
-  if (!p) return null;
-  const obj = p.toObject();
+
+  const org = await Org.findById(id).populate({ path: 'specialties' });
+  if (!org) throw BadRequestError('Org not found');
+
+  const obj = org.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
-  if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
-  // hide internal fields from public response
-  // keep obj._id so client can PATCH using the Mongo id
-  if (obj.owner_id) delete obj.owner_id;
+  if (!obj.specialties) obj.specialties = (obj.specialties || []).map(s => s.id || s);
   return obj;
 }
 
@@ -186,9 +204,11 @@ async function updateOrg(id, authUserId, update) {
 
   if (org.owner_id.toString() !== authUserId.toString()) throw UnauthorizedError('Cannot modify org you do not own');
 
-  if (update.specialties) await verifySpecialties(update.specialties);
+  if (update.specialties) {
+    update.specialties = await verifySpecialties(update.specialties);
+  }
 
-  const allowed = ['name','org_image_url','specialties','phone','address','city','state','zipcode','is_open','donation_needed','donation_aquired','website'];
+  const allowed = ['name','org_image_url','specialties','phone','address','city','state','zipcode','is_open','donations_needed','donations_acquired','website'];
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(update, key)) org[key] = update[key];
   }
