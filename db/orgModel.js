@@ -17,15 +17,14 @@ const OrgSchema = new Schema(
     website: { type: String, trim: true },
     org_image_url: { type: String, trim: true },
     specialties: [{ type: Schema.Types.ObjectId, ref: 'Type' }],
-    specialty_codes: [{ type: Number }], // numeric codes (frontend convenience)
     phone: { type: String, trim: true },
     address: { type: String, trim: true },
     city: { type: String, trim: true },
     state: { type: String, trim: true },
     zipcode: { type: String, trim: true },
     is_open: { type: Boolean, default: false },
-    donation_goal: { type: Number, default: 0 },
-    donation_amount: { type: Number, default: 0 },
+    donations_needed: { type: Number, default: 0 },
+    donations_acquired: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -129,8 +128,8 @@ async function createOrg(authUserId, payload) {
     state: payload.state,
     zipcode: payload.zip || payload.zipcode || '',
     is_open: !!payload.is_open,
-    donation_goal: Number(payload.donation_goal || payload.donationGoal) || 0,
-    donation_amount: Number(payload.donation_amount || payload.donationAmount) || 0,
+    donation_needed: Number(payload.donation_goal || payload.donationGoal) || 0,
+    donation_aquired: Number(payload.donation_amount || payload.donationAmount) || 0,
     owner_id: authUserId,
     owner_user_id: user.user_id || authUserId.toString(),
     org_id: pubId,
@@ -189,7 +188,7 @@ async function updateOrg(id, authUserId, update) {
 
   if (update.specialties) await verifySpecialties(update.specialties);
 
-  const allowed = ['name','org_image_url','specialties','specialty_codes','phone','address','city','state','zipcode','is_open','donation_goal','donation_amount','website'];
+  const allowed = ['name','org_image_url','specialties','phone','address','city','state','zipcode','is_open','donation_needed','donation_aquired','website'];
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(update, key)) org[key] = update[key];
   }
@@ -198,7 +197,7 @@ async function updateOrg(id, authUserId, update) {
   const p = await Org.findById(org._id).populate({ path: 'specialties' });
   const obj = p.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
-  if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
+  if (!obj.specialties) obj.specialties = (obj.specialties || []).map(s => s.id || s);
   return obj;
 }
 
