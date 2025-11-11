@@ -205,7 +205,26 @@ async function getOrgById(id) {
 
   const obj = org.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
-  if (!obj.specialties) obj.specialties = (obj.specialties || []).map(s => s.id || s);
+  // normalize specialties to unique objects with _id, name and code
+  if (obj.specialties && obj.specialties.length) {
+    const seen = new Set();
+    const normalized = [];
+    for (const s of obj.specialties) {
+      if (!s) continue;
+      const sid = s._id ? String(s._id) : (s.id ? String(s.id) : null);
+      const name = s.name || s.label || null;
+      const code = s.code || s.id || null;
+      const key = sid || `${name}:${code}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      normalized.push({ _id: sid || null, name: name || null, code: code || null });
+    }
+    obj.specialties = normalized;
+    obj.specialty_codes = Array.from(new Set(normalized.map(n => n.code).filter(Boolean)));
+  } else {
+    obj.specialties = [];
+    obj.specialty_codes = [];
+  }
   return obj;
 }
 
@@ -214,7 +233,26 @@ async function listOrgs() {
   return docs.map(d => {
     const obj = d.toObject();
     if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
-    if (!obj.specialty_codes) obj.specialty_codes = (obj.specialties || []).map(s => s.id || s);
+    // normalize specialties to unique objects and build specialty_codes
+    if (obj.specialties && obj.specialties.length) {
+      const seen = new Set();
+      const normalized = [];
+      for (const s of obj.specialties) {
+        if (!s) continue;
+        const sid = s._id ? String(s._id) : (s.id ? String(s.id) : null);
+        const name = s.name || s.label || null;
+        const code = s.code || s.id || null;
+        const key = sid || `${name}:${code}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        normalized.push({ _id: sid || null, name: name || null, code: code || null });
+      }
+      obj.specialties = normalized;
+      obj.specialty_codes = Array.from(new Set(normalized.map(n => n.code).filter(Boolean)));
+    } else {
+      obj.specialties = [];
+      obj.specialty_codes = [];
+    }
     // hide internal fields from public response
     if (obj.owner_id) delete obj.owner_id;
     return obj;
@@ -243,7 +281,26 @@ async function updateOrg(id, authUserId, update) {
   const p = await Org.findById(org._id).populate({ path: 'specialties' });
   const obj = p.toObject();
   if (!obj.org_image_url) obj.org_image_url = 'https://via.placeholder.com/300x200';
-  if (!obj.specialties) obj.specialties = (obj.specialties || []).map(s => s.id || s);
+  // normalize specialties to unique objects with _id, name and code
+  if (obj.specialties && obj.specialties.length) {
+    const seen = new Set();
+    const normalized = [];
+    for (const s of obj.specialties) {
+      if (!s) continue;
+      const sid = s._id ? String(s._id) : (s.id ? String(s.id) : null);
+      const name = s.name || s.label || null;
+      const code = s.code || s.id || null;
+      const key = sid || `${name}:${code}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      normalized.push({ _id: sid || null, name: name || null, code: code || null });
+    }
+    obj.specialties = normalized;
+    obj.specialty_codes = Array.from(new Set(normalized.map(n => n.code).filter(Boolean)));
+  } else {
+    obj.specialties = [];
+    obj.specialty_codes = [];
+  }
   return obj;
 }
 
