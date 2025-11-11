@@ -75,33 +75,44 @@ async function verifySpecialties(ids = []) {
   if (!ids || !ids.length) return [];
   const Type = mongoose.model('Type');
 
-  // if all items look like ObjectIds, validate existence
-  const allObjectIds = ids.every(i => mongoose.Types.ObjectId.isValid(String(i)));
-  if (allObjectIds) {
-    const count = await Type.countDocuments({ _id: { $in: ids } });
-    if (count !== ids.length) throw BadRequestError('One or more specialties not found');
-    return ids;
-  }
+  const resolved = [];
+  // helper to escape regex special chars for name matching
+  const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // otherwise try to resolve by name (string) or numeric id/code
-  const stringItems = ids.map(i => String(i));
-  // try match by name
-  const foundByName = await Type.find({ name: { $in: stringItems } });
-  if (foundByName && foundByName.length) {
-    // if every string item matched a Type by name, return those ids
-    if (foundByName.length === stringItems.filter(si => isNaN(Number(si))).length) {
-      return foundByName.map(d => d._id);
+  for (const item of ids) {
+    // skip empty values
+    if (item === null || item === undefined || String(item).trim() === '') continue;
+
+    // 1) If looks like ObjectId and exists, accept it
+    if (mongoose.Types.ObjectId.isValid(String(item))) {
+      const exists = await Type.exists({ _id: item });
+      if (!exists) throw BadRequestError('One or more specialties not found');
+      resolved.push(item);
+      continue;
     }
+
+    // 2) If numeric code, try to find by numeric id field
+    const asNum = Number(item);
+    if (Number.isFinite(asNum)) {
+      const found = await Type.findOne({ id: asNum });
+      if (!found) throw BadRequestError('One or more specialties not found');
+      resolved.push(found._id);
+      continue;
+    }
+
+    // 3) Otherwise treat as name (case-insensitive exact match)
+    const name = String(item).trim();
+    const foundByName = await Type.findOne({ name: { $regex: `^${escapeRegExp(name)}$`, $options: 'i' } });
+    if (foundByName) {
+      resolved.push(foundByName._id);
+      continue;
+    }
+
+    // not resolved
+    throw BadRequestError('One or more specialties not found');
   }
 
-  // attempt to resolve numeric codes (e.g. local mapping ids)
-  const numericCandidates = ids.map(i => { const n = Number(i); return Number.isFinite(n) ? n : null; }).filter(Boolean);
-  if (numericCandidates.length) {
-    const foundByCode = await Type.find({ id: { $in: numericCandidates } });
-    if (foundByCode && foundByCode.length === numericCandidates.length) return foundByCode.map(d => d._id);
-  }
-
-  throw BadRequestError('One or more specialties not found');
+  return resolved;
 }
 
 // helper to generate 8-char id
