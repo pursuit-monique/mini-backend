@@ -57,28 +57,29 @@ function jwtAuth(secret) {
     throw new Error('jwtAuth requires a JWT secret string');
   }
   return (req, res, next) => {
-    const auth = req.headers && req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
-      console.warn('profile.jwtAuth: missing or malformed Authorization header on', req.path);
+    const authHeader = req.headers && req.headers.authorization;
+    let token;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else if (req.cookies && req.cookies.TOKEN) {
+      token = req.cookies.TOKEN;
+    }
+
+    if (!token) {
+      console.warn('profile.jwtAuth: missing Authorization header and no TOKEN cookie on', req.path);
       return next(UnauthorizedError('Missing Authorization header or token'));
     }
-    const token = auth.slice(7).trim();
+
     try {
-      console.debug('profile.jwtAuth: token length', token.length, 'for', req.path);
       const payload = jwt.verify(token, secret);
-      console.debug('profile.jwtAuth: decoded payload', payload);
-      const id = payload && (payload._id || payload.userId);
-      const pub = payload && payload.luser;
+      const id = payload && (payload._id || payload.userId || payload.id || payload.user_id);
+      const pub = payload && (payload.luser || payload.user_id);
       if (!id) {
         console.warn('profile.jwtAuth: token payload missing user id for', req.path, 'payload:', payload);
         return next(UnauthorizedError('Token payload missing user id'));
       }
-      if (!pub) {
-        // allow but warn if luser missing
-        console.warn('profile.jwtAuth: token missing public user id (luser)');
-      }
       req.user = { id };
-      req.user.luser = pub;
+      if (pub) req.user.luser = pub;
       return next();
     } catch (err) {
       console.error('profile.jwtAuth: token verification failed for', req.path, 'error:', err && err.message);
@@ -174,6 +175,7 @@ async function deleteProfile(targetUserId, authUserId) {
   if (!authUserId) throw UnauthorizedError('Not authenticated');
   if (!targetUserId) throw BadRequestError('Missing target user id');
 
+  // ensure caller is owner
   if (authUserId.toString() !== targetUserId.toString()) throw UnauthorizedError('Cannot delete another user profile');
 
   const profile = await Profile.findOne({ user: targetUserId });
